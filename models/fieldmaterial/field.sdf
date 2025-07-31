@@ -1,0 +1,31 @@
+<?xml version="1.0" ?>
+<sdf version="1.10">
+  <model name="field">
+    <static>true</static>
+    <link name="link">
+      <collision name="collision">
+        <geometry>
+          <plane>
+            <normal>0 0 1</normal>
+            <size>100 100</size>
+          </plane>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <plane>
+            <normal>0 0 1</normal>
+            <size>100 100</size>
+          </plane>
+        </geometry>
+        <material>
+          <script>
+            <uri>model://fieldmaterial/materials/scripts</uri>
+            <uri>model://fieldmaterial/materials/textures</uri>
+            <name>custom/GroundMaterial</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

@@ -1,0 +1,13 @@
+material /custom/FieldMaterial
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture field.jpg
+      }
+    }
+  }
+}

@@ -1,0 +1,316 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot name="linetrace_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <material name="gray">
+    <color rgba="0.67 0.67 0.67 0.8"/>
+  </material>
+
+  <material name="deep_black">
+    <color rgba="0.0 0.0 0.0 1.0"/>
+  </material>
+
+  <material name="light_black">
+    <color rgba="0.105 0.105 0.105 0.8"/>
+  </material>
+
+  <!-- gazebo tags -->
+   <gazebo reference="body_ballcaster">
+      <mu1 value="0.1" />
+      <mu2 value="0.1" />
+   </gazebo>
+
+  <gazebo>
+    <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(find robot_desc)/config/wheel_controllers.yaml</parameters>
+    </plugin>
+  </gazebo>
+
+  <ros2_control name="GazeboSimSystem" type="system">
+    <hardware>
+      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+    </hardware>
+    <joint name="motorRight_wheelRight">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="motorLeft_wheelLeft">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
+
+   <gazebo>
+      <plugin filename="gz-sim-joint-state-publisher-system"
+              name="gz::sim::systems::JointStatePublisher">
+              <joint_name>motorRight_wheelRight</joint_name>
+              <joint_name>motorLeft_wheelLeft</joint_name>
+      </plugin>
+   </gazebo>
+
+  <!-- link tags -->
+  <link name="root_link" />
+
+  <link name="body">
+    <visual>
+      <geometry>
+        <mesh filename="package://robot_desc/meshes/body2.stl" scale="1 1 1"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="gray" />
+    </visual>
+    <inertial>
+      <origin xyz="0.0 0.040453 -0.030739" rpy="0 0 0" />
+      <mass value="0.62426" />
+      <inertia 
+        ixx="0.003120" ixy="0.000009029163" ixz="0.000006510861"
+        iyy="0.001229" iyz="-0.000070511"
+        izz="0.003483" />
+    </inertial>
+  </link>
+
+  <link name="camera_link">
+      <visual>
+        <geometry>
+          <box size="0.001 0.02 0.122"/>
+        </geometry>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+      </visual>
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.0001"/>
+      <inertia
+          ixx="0.0" ixy="0.0" ixz="0.0"
+          iyy="0.0" iyz="0.0"
+          izz="0.0" />
+      </inertial>
+      <collision>
+        <geometry>
+          <box size="0.001 0.02 0.122"/>
+        </geometry>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+      </collision>
+    </link>
+
+    <xacro:macro name="illuminance_sensor" params="index pos_z">
+      <link name="illuminance_sensor_${index}">
+        <visual>
+          <geometry>
+            <box size="0.002 0.002 0.002"/>
+          </geometry>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <material name="gray"/>
+        </visual>
+        <inertial>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <mass value="0.0001"/>
+          <inertia
+              ixx="1.0e-9" ixy="0.0" ixz="0.0"
+              iyy="1.0e-9" iyz="0.0"
+              izz="1.0e-9" />
+        </inertial>
+      </link>
+
+      <joint name="camera_illuminance_${index}" type="fixed">
+        <parent link="camera_link"/>
+        <child link="illuminance_sensor_${index}"/>
+        <origin xyz="0 0 ${pos_z}" rpy="0 0 0"/>
+      </joint>
+
+      <gazebo reference="illuminance_sensor_${index}">
+        <sensor name="camera_${index}" type="camera">
+          <camera>
+            <horizontal_fov>1.5708</horizontal_fov> 
+            <image>
+              <width>80</width>
+              <height>80</height>
+              <format>R8G8B8</format>
+            </image>
+            <clip>
+              <near>0.001</near>
+              <far>5</far>
+            </clip>
+            <lens>
+              <type>orthographic</type>
+            </lens>
+            <optical_frame_id>camera_link_${index}</optical_frame_id>
+            <camera_info_topic>camera_${index}/camera_info</camera_info_topic>
+          </camera>
+            <always_on>1</always_on>
+            <update_rate>20</update_rate>
+            <visualize>false</visualize>
+            <topic>camera_${index}/image_raw</topic> 
+        </sensor>
+      </gazebo>
+    </xacro:macro>
+
+      <xacro:illuminance_sensor index="1" pos_z="-0.05375"/>
+      <xacro:illuminance_sensor index="2" pos_z="-0.03839"/>
+      <xacro:illuminance_sensor index="3" pos_z="-0.02304"/>
+      <xacro:illuminance_sensor index="4" pos_z="-0.00768"/>
+      <xacro:illuminance_sensor index="5" pos_z="0.00768"/>
+      <xacro:illuminance_sensor index="6" pos_z="0.02304"/>
+      <xacro:illuminance_sensor index="7" pos_z="0.03839"/>
+      <xacro:illuminance_sensor index="8" pos_z="0.05375"/>
+
+  <link name="ballcaster">
+    <visual>
+      <geometry>
+        <mesh filename="package://robot_desc/meshes/ballcaster.stl" scale="1 1 1"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="deep_black"/>
+    </visual>
+    <inertial>
+      <origin xyz="0.0 0.0 6.522e-3" rpy="0 0 0" />
+      <mass value="47.104e-3" />
+      <inertia 
+        ixx="2464.439e-9" ixy="0.0" ixz="0.0"
+        iyy="2684.693e-9" iyz="0.0"
+        izz="3234.311e-9" />
+    </inertial>
+    <collision>
+        <geometry>
+          <sphere radius="0.007"/>
+        </geometry>
+        <origin xyz="0 0 0.01" rpy="0 0 0"/>
+    </collision>
+  </link>
+
+  <link name="motorRight">
+    <visual>
+      <geometry>
+          <mesh filename="package://robot_desc/meshes/motor.stl" scale="1 1 1"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 ${pi/2} 0"/>
+      <material name="light_black"/>
+    </visual>
+    <inertial>
+      <origin xyz="15.549e-3 0.0 0.0" rpy="0 0 0" />
+      <mass value="35.358e-3" />
+      <inertia 
+        ixx="3340.002e-9" ixy="0.0" ixz="0.0"
+        iyy="3340.002e-9" iyz="0.0"
+        izz="838.727e-9" />
+    </inertial>
+  </link>
+
+  <link name="motorLeft">
+    <visual>
+      <geometry>
+          <mesh filename="package://robot_desc/meshes/motor.stl" scale="1 1 1"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 ${pi/2} 0"/>
+      <material name="light_black"/>
+    </visual>
+    <inertial>
+      <origin xyz="15.549e-3 0.0 0.0" rpy="0 0 0" />
+      <mass value="35.358e-3" />
+      <inertia 
+        ixx="3340.002e-9" ixy="0.0" ixz="0.0"
+        iyy="3340.002e-9" iyz="0.0"
+        izz="838.727e-9" />
+    </inertial>
+  </link>
+
+  <link name="wheelRight">
+    <visual>
+      <geometry>
+        <mesh filename="package://robot_desc/meshes/wheel.stl" scale="1 1 1"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 ${pi}"/>
+      <material name="deep_black"/>
+    </visual>
+    <inertial>
+      <origin xyz="0.0 0.0 0.0" rpy="0 0 ${pi}" />
+      <mass value="3.087e-3" />
+      <inertia 
+        ixx="4.71331e-7" ixy="0.0" ixz="0.0"
+        iyy="2.4712e-7" iyz="0.0"
+        izz="2.4701e-7" />
+    </inertial>
+    <collision>
+        <geometry>
+          <sphere radius="0.016"/>
+        </geometry>
+        <origin xyz="0.0 0 0.0" rpy="0 0 0"/>
+    </collision>
+  </link>
+
+  <link name="wheelLeft">
+    <visual>
+      <geometry>
+        <mesh filename="package://robot_desc/meshes/wheel.stl" scale="1 1 1"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="deep_black"/>
+    </visual>
+    <inertial>
+      <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+      <mass value="3.087e-3" />
+      <inertia 
+        ixx="4.71331e-7" ixy="0.0" ixz="0.0"
+        iyy="2.4712e-7" iyz="0.0"
+        izz="2.4701e-7" />
+    </inertial>
+    <collision>
+        <geometry>
+          <sphere radius="0.016"/>
+        </geometry>
+        <origin xyz="0 0 0.0" rpy="0 0 0"/>
+    </collision>
+  </link>
+
+  <!-- joint tags -->
+  <joint name="root_to_body" type="fixed">
+    <parent link="root_link"/>
+    <child link="body"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+   <joint name="body_camera" type="fixed">
+    <parent link="body"/>
+    <child link="camera_link"/>
+    <origin xyz="-0.001 -0.07 -0.011" rpy="0 ${pi/2} 0"/>
+  </joint>
+
+  <!--<joint name="camera_optical_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+    <parent link="camera_link"/>
+    <child link="camera_link_optical"/>
+  </joint>-->
+
+  <!---0.011-->
+  <joint name="body_ballcaster" type="fixed">
+    <parent link="body"/>
+    <child link="ballcaster"/>
+    <origin xyz="0 -0.04 0.0" rpy="0 ${pi} 0"/>
+  </joint>
+
+  <joint name="body_motorRight" type="fixed">
+    <parent link="body"/>
+    <child link="motorRight"/>
+    <origin xyz="-0.03 0.065 -0.0047" rpy="0 0 ${pi}"/>
+  </joint>
+
+  <joint name="motorRight_wheelRight" type="continuous">
+    <parent link="motorRight"/>
+    <child link="wheelRight"/>
+    <origin xyz="0.046 0 0" rpy="0 0 ${pi}"/>
+    <axis xyz="1 0 0"/>
+  </joint>
+
+  <joint name="body_motorLeft" type="fixed">
+    <parent link="body"/>
+    <child link="motorLeft"/>
+    <origin xyz="0.03 0.065 -0.0047" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="motorLeft_wheelLeft" type="continuous">
+    <parent link="motorLeft"/>
+    <child link="wheelLeft"/>
+    <origin xyz="0.046 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+  </joint>
+</robot>

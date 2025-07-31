@@ -1,0 +1,30 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 1000
+    
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+      
+    left_wheel_velocity_controller:
+      type: velocity_controllers/JointGroupVelocityController
+      
+    right_wheel_velocity_controller:
+      type: velocity_controllers/JointGroupVelocityController
+
+joint_state_broadcaster:
+  ros__parameters:
+    joints:
+      - motorLeft_wheelLeft
+      - motorRight_wheelRight
+
+left_wheel_velocity_controller:
+  ros__parameters:
+    joints:
+      - motorLeft_wheelLeft
+    interface_name: velocity
+
+right_wheel_velocity_controller:
+  ros__parameters:
+    joints:
+      - motorRight_wheelRight
+    interface_name: velocity
