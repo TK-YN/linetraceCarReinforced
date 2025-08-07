@@ -34,7 +34,7 @@ This data is used to train the model to output optimal PID values for controllin
     ```bash
     python3 train.py
     ```
-    ![Learning in progress](images/training_in_progress.png)
+    ![Learning in progress](images/progress_to_learn.png)
 
 3.  **Monitor and Visualize Results:**
     Training can be stopped manually by pressing `Ctrl+C` or will conclude automatically after a set number of episodes. Upon completion, graphs will be displayed showing the progress of the training, including:
