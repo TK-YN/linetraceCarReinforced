@@ -26,7 +26,7 @@ This data is used to train the model to output optimal PID values for controllin
 1.  **Launch the Simulation:**
     First, launch the Gazebo simulation and the ROS2-Gazebo bridge by running the launch file. The bridge configuration is specified in the included YAML file.
     ```bash
-    ros2 launch robot_desc linetrace_gazebo.xml.launch
+    ros2 launch your_package linetrace_gazebo.launch.xml
     ```
 
 2.  **Start Training:**
