@@ -10,9 +10,125 @@ import math
 from environment.linetrace_env_node import LineTraceEnv
 import rclpy
 from rclpy.node import Node
+import matplotlib.pyplot as plt
+import signal
+import sys
+import os
+from datetime import datetime
 
 
-# --- ニューラルネットワークモデル (EnhancedPIDPolicyNetwork) ---
+# --- グローバル変数（学習データ収集用） ---
+training_data = {
+    'episodes': [],
+    'episode_rewards': [],
+    'episode_lengths': [],
+    'policy_losses': [],
+    'value_losses': [],
+    'entropy_losses': [],
+    'total_losses': [],
+    'average_pid_params': [],
+    'moving_avg_rewards': []
+}
+
+def signal_handler(sig, frame):
+    print("\nTraining interrupted! Displaying results...")
+    plot_training_results()
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+
+def plot_training_results():
+    if not training_data['episodes']:
+        print("No training data to plot.")
+        return
+    
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    fig.suptitle('RL Training Results - Line Tracing PID Control', fontsize=16)
+    
+    #Episode Rewards
+    axes[0, 0].plot(training_data['episodes'], training_data['episode_rewards'], 'b-', alpha=0.6, label='Episode Reward')
+    if training_data['moving_avg_rewards']:
+        axes[0, 0].plot(training_data['episodes'], training_data['moving_avg_rewards'], 'r-', linewidth=2, label='Moving Average (10 episodes)')
+    axes[0, 0].set_xlabel('Episode')
+    axes[0, 0].set_ylabel('Total Reward')
+    axes[0, 0].set_title('Episode Rewards Over Time')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True, alpha=0.3)
+    
+    #Episode Lengths
+    axes[0, 1].plot(training_data['episodes'], training_data['episode_lengths'], 'g-', alpha=0.7)
+    axes[0, 1].set_xlabel('Episode')
+    axes[0, 1].set_ylabel('Episode Length (steps)')
+    axes[0, 1].set_title('Episode Length Over Time')
+    axes[0, 1].grid(True, alpha=0.3)
+    
+    #Training Losses
+    if training_data['policy_losses']:
+        loss_episodes = list(range(0, len(training_data['policy_losses'])))
+        axes[0, 2].plot(loss_episodes, training_data['policy_losses'], 'r-', label='Policy Loss', alpha=0.8)
+        axes[0, 2].plot(loss_episodes, training_data['value_losses'], 'b-', label='Value Loss', alpha=0.8)
+        axes[0, 2].plot(loss_episodes, training_data['total_losses'], 'k-', label='Total Loss', alpha=0.8)
+        axes[0, 2].set_xlabel('PPO Update')
+        axes[0, 2].set_ylabel('Loss')
+        axes[0, 2].set_title('Training Losses')
+        axes[0, 2].legend()
+        axes[0, 2].grid(True, alpha=0.3)
+    
+    #PID Parameters Evolution
+    if training_data['average_pid_params']:
+        pid_data = np.array(training_data['average_pid_params'])
+        axes[1, 0].plot(training_data['episodes'], pid_data[:, 0], 'r-', label='Kp', alpha=0.8)
+        axes[1, 0].plot(training_data['episodes'], pid_data[:, 1], 'g-', label='Ki', alpha=0.8)
+        axes[1, 0].plot(training_data['episodes'], pid_data[:, 2], 'b-', label='Kd', alpha=0.8)
+        axes[1, 0].set_xlabel('Episode')
+        axes[1, 0].set_ylabel('PID Parameter Value')
+        axes[1, 0].set_title('Average PID Parameters Evolution')
+        axes[1, 0].legend()
+        axes[1, 0].grid(True, alpha=0.3)
+    
+    #Reward Distribution
+    if len(training_data['episode_rewards']) > 5:
+        axes[1, 1].hist(training_data['episode_rewards'], bins=20, alpha=0.7, color='skyblue', edgecolor='black')
+        axes[1, 1].set_xlabel('Episode Reward')
+        axes[1, 1].set_ylabel('Frequency')
+        axes[1, 1].set_title('Reward Distribution')
+        axes[1, 1].grid(True, alpha=0.3)
+    
+    #Performance Summary
+    axes[1, 2].axis('off')
+    if training_data['episode_rewards']:
+        recent_rewards = training_data['episode_rewards'][-10:] if len(training_data['episode_rewards']) >= 10 else training_data['episode_rewards']
+        summary_text = f"""
+            Training Summary:
+            Total Episodes: {len(training_data['episodes'])}
+            Average Reward: {np.mean(training_data['episode_rewards']):.2f}
+            Recent Avg (last 10): {np.mean(recent_rewards):.2f}
+            Best Reward: {np.max(training_data['episode_rewards']):.2f}
+            Average Episode Length: {np.mean(training_data['episode_lengths']):.1f}
+            PPO Updates: {len(training_data['policy_losses'])}
+        """
+        axes[1, 2].text(0.1, 0.9, summary_text, transform=axes[1, 2].transAxes, fontsize=11,
+                        verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    plt.tight_layout()
+    
+    #Save the plot
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"training_results_{timestamp}.png"
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"Training results saved as {filename}")
+    
+    #Show the plot
+    plt.show()
+
+def update_moving_average(new_reward, window_size=10):
+    if len(training_data['episode_rewards']) < window_size:
+        return np.mean(training_data['episode_rewards'])
+    else:
+        return np.mean(training_data['episode_rewards'][-window_size:])
+
+
+# --- Neural Network Model (EnhancedPIDPolicyNetwork) ---
 class EnhancedPIDPolicyNetwork(nn.Module):
     def __init__(self, input_dim, lstm_hidden_size, output_dim):
         super(EnhancedPIDPolicyNetwork, self).__init__()
@@ -22,27 +138,26 @@ class EnhancedPIDPolicyNetwork(nn.Module):
         self.feature_extractor = nn.Sequential(
             nn.Linear(input_dim, 256),
             nn.ReLU(),
-            nn.Linear(256, lstm_hidden_size), # LSTMのinput_sizeに合わせる
+            nn.Linear(256, lstm_hidden_size),
             nn.ReLU()
         )
         
         #LSTM層
-        #batch_first=True: (batch, seq_len, features) の入力形式
         self.lstm = nn.LSTM(lstm_hidden_size, lstm_hidden_size, batch_first=True)
         
-        # PID平均値のヘッド (出力は tanh でスケーリングされる前の生の値)
+        #PID平均値のヘッド
         self.pid_mean_head = nn.Sequential(
             nn.Linear(lstm_hidden_size, 128),
             nn.ReLU(),
             nn.Linear(128, output_dim)
         )
         
-        #PID標準偏差のヘッド (出力は Softplus で正の値に)
+        #PID標準偏差のヘッド
         self.pid_std_head = nn.Sequential(
             nn.Linear(lstm_hidden_size, 128),
             nn.ReLU(),
             nn.Linear(128, output_dim),
-            nn.Softplus() # 標準偏差は正である必要がある
+            nn.Softplus()
         )
         
         #価値関数のヘッド
@@ -53,15 +168,14 @@ class EnhancedPIDPolicyNetwork(nn.Module):
         )
 
     def forward(self, x, hidden_state=None):
-        # x: (batch_size, seq_len, input_dim)
         batch_size, seq_len, _ = x.size()
         
-        #特徴抽出 (各時間ステップごとに適用)
-        x_flat = x.view(batch_size * seq_len, -1) # (batch_size * seq_len, input_dim)
-        features = self.feature_extractor(x_flat) # (batch_size * seq_len, lstm_hidden_size)
-        features = features.view(batch_size, seq_len, -1) # (batch_size, seq_len, lstm_hidden_size)
+        #特徴抽出
+        x_flat = x.view(batch_size * seq_len, -1)
+        features = self.feature_extractor(x_flat)
+        features = features.view(batch_size, seq_len, -1)
 
-        # STMを適用
+        #LSTMを適用
         if hidden_state is None:
             h0 = torch.zeros(1, batch_size, self.lstm_hidden_size).to(x.device)
             c0 = torch.zeros(1, batch_size, self.lstm_hidden_size).to(x.device)
@@ -69,16 +183,17 @@ class EnhancedPIDPolicyNetwork(nn.Module):
         else:
             lstm_out, (h_n, c_n) = self.lstm(features, hidden_state)
         
-        last_hidden_state = lstm_out[:, -1, :] #(batch_size, lstm_hidden_size)
+        last_hidden_state = lstm_out[:, -1, :]
         
         #各ヘッドから出力を計算
-        pid_mean_raw = self.pid_mean_head(last_hidden_state) #生のPID平均値 (スケール前)
-        pid_std = self.pid_std_head(last_hidden_state) + 1e-6 #標準偏差 (Softplus済み、最小値でクリッピング)
+        pid_mean_raw = self.pid_mean_head(last_hidden_state)
+        pid_std = self.pid_std_head(last_hidden_state) + 1e-6
         value = self.value_head(last_hidden_state)
         
         return pid_mean_raw, pid_std, value, (h_n, c_n)
 
-# --- エージェント (EnhancedLineTracePIDAgent) ---
+
+# --- Agent (EnhancedLineTracePIDAgent) ---
 class EnhancedLineTracePIDAgent:
     def __init__(self,
                  input_dim,
@@ -118,15 +233,18 @@ class EnhancedLineTracePIDAgent:
         self.h_n = None 
         self.c_n = None 
 
+                
         self.integral_error = 0.0
         self.last_error = 0.0
+
+        #エピソード中のPIDパラメータ追跡用
+        self.episode_pid_params = []
 
         self.reset_history() 
 
     def reset_history(self):
         """エピソード開始時に履歴とLSTMの隠れ状態をリセット"""
         self.state_history.clear()
-        #LSTMの隠れ状態をゼロで初期化 (バッチサイズ1を想定)
         self.h_n = torch.zeros(1, 1, self.lstm_hidden_size).to(self.device)
         self.c_n = torch.zeros(1, 1, self.lstm_hidden_size).to(self.device)
         self.last_pid_params = np.array([0.0, 0.0, 0.0], dtype=np.float32)
@@ -134,9 +252,9 @@ class EnhancedLineTracePIDAgent:
         self.curve_detected = False
         self.integral_error = 0.0
         self.last_error = 0.0
+        self.episode_pid_params = []
 
     def preprocess_state(self, current_raw_state):
-
         #センサーデータ（輝度値）
         brightness = current_raw_state[:8]
         
@@ -145,13 +263,13 @@ class EnhancedLineTracePIDAgent:
 
         brightness_array = np.array(brightness)
         
-        #輝度値の差分 (隣接するセンサー間の輝度差)
+        #輝度値の差分（隣接するセンサー間の輝度差）
         brightness_diffs = []
         for i in range(len(brightness) - 1):
             diff = brightness[i] - brightness[i+1]
             brightness_diffs.append(diff)
         
-        #輝度値の2次差分 (差分の差分)
+        #輝度値の2次差分（差分の差分）
         second_diffs = []
         for i in range(len(brightness_diffs) - 1):
             second_diff = brightness_diffs[i] - brightness_diffs[i+1]
@@ -165,16 +283,13 @@ class EnhancedLineTracePIDAgent:
         normalized_brightness_diffs = np.array(brightness_diffs) / 255.0
         normalized_second_diffs = np.array(second_diffs) / 255.0
         
-        #前回のPIDパラメータ（エージェント自身の出力履歴）
-        MAX_KP, MAX_KI, MAX_KD = self.max_pid.cpu().numpy()
-        #正規化は0-1の間で行う
+        #前回のPIDパラメータ
         normalized_last_pid_params = (self.last_pid_params - self.min_pid.cpu().numpy()) / (self.max_pid.cpu().numpy() - self.min_pid.cpu().numpy() + 1e-8)
         
-        #前回の車輪速度（エージェント自身の出力履歴）
+        #前回の車輪速度
         normalized_last_wheel_speeds = self.last_wheel_speeds / MAX_RPM
         
-        #カーブ検出フラグ
-        #左右のセンサーの偏りを使ってカーブを検出
+        #カーブ検出
         curve_indicator = 0.0
         if brightness[0] > 200 and max(brightness[4:]) < 50: 
             curve_indicator = 1.0
@@ -203,8 +318,7 @@ class EnhancedLineTracePIDAgent:
         else:
             state_sequence_np = np.array(list(self.state_history), dtype=np.float32)
         
-        #テンソルに変換し、LSTMの入力形式 (batch_size, seq_len, input_dim) に合わせる
-        state_sequence_tensor = torch.from_numpy(state_sequence_np).to(self.device).unsqueeze(0) # Unsqueezeで batch_size=1 を追加
+        state_sequence_tensor = torch.from_numpy(state_sequence_np).to(self.device).unsqueeze(0)
 
         if training:
             self.policy_net.train()
@@ -217,10 +331,7 @@ class EnhancedLineTracePIDAgent:
         self.h_n, self.c_n = h_n_out.detach(), c_n_out.detach()
 
         # --- PID平均値のスケーリング ---
-        #tanhを適用して出力を -1 から 1 の範囲に正規化
         pid_mean_normalized = torch.tanh(pid_mean_raw)
-        
-        #正規化された値を min_pid から max_pid の範囲に線形スケーリング
         pid_mean_scaled = self.min_pid + (self.max_pid - self.min_pid) * ((pid_mean_normalized + 1) / 2)
 
         #ガウス分布を生成
@@ -229,14 +340,16 @@ class EnhancedLineTracePIDAgent:
         #分布からPIDパラメータをサンプリング
         pid_params_sampled = dist.sample()
         
-        #サンプリングされたPIDパラメータを min_pid と max_pid の範囲にクリッピング
+        #サンプリングされたPIDパラメータをクリップ
         pid_params_clipped = torch.max(torch.min(pid_params_sampled, self.max_pid), self.min_pid).squeeze(0)
         
         log_prob = dist.log_prob(pid_params_sampled).sum() 
 
         self.last_pid_params = pid_params_clipped.cpu().numpy()
+        
+        #このエピソードのPIDパラメータを保存
+        self.episode_pid_params.append(self.last_pid_params.copy())
 
-        #LSTMへの入力として使用された整形済みの状態シーケンスと、サンプリングされたPIDパラメータ、ログ確率、価値を返す
         return pid_params_clipped.detach().cpu().numpy(), log_prob.detach(), value.detach(), state_sequence_np
 
     def get_wheel_speeds(self, brightness_sensors, pid_params):
@@ -246,7 +359,7 @@ class EnhancedLineTracePIDAgent:
         Kp, Ki, Kd = pid_params
 
         sensor_positions_mm = np.array([-35, -25, -15, -5, 5, 15, 25, 35])
-        weights = np.maximum(0, 255 - np.array(brightness_sensors)) # ラインが黒、背景が白を想定
+        weights = np.maximum(0, 255 - np.array(brightness_sensors))
         
         sum_weights = np.sum(weights)
         if sum_weights > 0:
@@ -297,23 +410,24 @@ class EnhancedLineTracePIDAgent:
             advantages.insert(0, delta)
         return torch.tensor(advantages, dtype=torch.float32).to(self.device)
 
+
 # --- メインの学習ループ ---
 def main(args=None):
     rclpy.init(args=args) 
 
-    # \パラメータ設定
-    input_dim = 29 #センサー8個 + 車輪速度2個 = 10個, 前処理で追加される特徴量 (8+2+7+6+3+2+1=29)
-    output_dim = 3 #PID (Kp, Ki, Kd)
-    seq_len = 8 #LSTMのシーケンス長 (preprocess_stateで生成される特徴量の数に依存)
-    lr = 0.0003 #学習率
-    gamma = 0.99 #割引率
-    gae_lambda = 0.95 #GAEのラムダ
-    eps_clip = 0.2 #PPOのクリッピングパラメータ
-    lstm_hidden_size = 512 # LSTMの隠れ状態サイズ
+    #パラメータ設定
+    input_dim = 29
+    output_dim = 3
+    seq_len = 8
+    lr = 0.0003
+    gamma = 0.99
+    gae_lambda = 0.95
+    eps_clip = 0.2
+    lstm_hidden_size = 512
 
     max_episodes = 2000 
-    batch_size = 4 #PPO更新を行うためのエピソード数 
-    ppo_epochs = 4 #PPOの最適化ステップ数
+    batch_size = 4
+    ppo_epochs = 4
 
     env_node = LineTraceEnv()
     env_node.get_logger().set_level(rclpy.logging.LoggingSeverity.INFO) 
@@ -323,14 +437,13 @@ def main(args=None):
     )
     optimizer = agent.optimizer
 
-    episode_buffer = collections.deque(maxlen=batch_size * 2) # PPOバッチサイズより少し大きめ
+    episode_buffer = collections.deque(maxlen=batch_size * 2)
 
     print("Starting training...")
     
     global_step_count = 0
 
     try:
-
         for episode in range(max_episodes):
             print(f"\n[TRAIN] === Episode {episode+1} (Global Step: {global_step_count}) ===")
 
@@ -342,29 +455,23 @@ def main(args=None):
             agent.reset_history() 
 
             episode_experiences = []
-
             total_episode_reward = 0.0 
-
             max_steps_per_episode = int(env_node.max_episode_duration * 1000) 
 
             for step_idx in range(max_steps_per_episode):
-
                 processed_current_state = agent.preprocess_state(raw_state)
                 agent.state_history.append(processed_current_state)
 
                 pid_params_current_step, log_prob_current_step, value_current_step, state_sequence_for_lstm = \
                     agent.determine_step_pid_params(training=True)
 
-                #推論されたPIDパラメータで車輪速度を計算
                 wheel_speeds = agent.get_wheel_speeds(raw_state[:8], pid_params_current_step)
                 
-                #ROS環境を1ステップ進める
                 next_raw_state, reward, done = env_node.step(wheel_speeds, step_idx)
                 total_episode_reward += reward 
 
-                #このステップの経験を保存
                 episode_experiences.append({
-                    'state_history': state_sequence_for_lstm, # ここで整形済みの状態シーケンスを保存
+                    'state_history': state_sequence_for_lstm,
                     'pid_params': pid_params_current_step,
                     'log_prob': log_prob_current_step.item(),
                     'value': value_current_step.item(),
@@ -372,11 +479,9 @@ def main(args=None):
                 })
 
                 raw_state = next_raw_state
-
                 global_step_count += 1
 
                 if done:
-                    #total_episode_reward を最終報酬として直接使用
                     final_calculated_reward = total_episode_reward
                     print(f"[TRAIN] Episode {episode+1} ended at step {step_idx+1}. Total Step Reward: {total_episode_reward:.2f}, Final Calculated Reward: {final_calculated_reward:.2f}")
                     break
@@ -384,10 +489,23 @@ def main(args=None):
                 final_calculated_reward = total_episode_reward
                 print(f"[TRAIN] Episode {episode+1} completed {max_steps_per_episode} steps. Total Step Reward: {total_episode_reward:.2f}, Final Calculated Reward: {final_calculated_reward:.2f}")
             
-            #エピソード終了後、このエピソードの経験をバッファに追加
+            #学習データの可視化用に保存
+            training_data['episodes'].append(episode + 1)
+            training_data['episode_rewards'].append(total_episode_reward)
+            training_data['episode_lengths'].append(len(episode_experiences))
+            
+            #このエピソードの平均PIDパラメータを計算
+            if agent.episode_pid_params:
+                avg_pid = np.mean(agent.episode_pid_params, axis=0)
+                training_data['average_pid_params'].append(avg_pid)
+            
+            #移動平均を更新
+            moving_avg = update_moving_average(total_episode_reward)
+            training_data['moving_avg_rewards'].append(moving_avg)
+            
             episode_buffer.append(episode_experiences)
 
-            #PPO学習の実行
+            #PPO学習
             if len(episode_buffer) >= batch_size:
                 print(f"[TRAIN] Starting PPO update for batch of {len(episode_buffer)} episodes...")
                 try:
@@ -413,7 +531,7 @@ def main(args=None):
 
                     all_advantages_list = []
                     all_returns_list = []
-                    current_idx = 0
+                    
                     for ep_exp_list in episode_buffer:
                         rewards_per_episode = [exp['reward'] for exp in ep_exp_list]
                         values_per_episode = [exp['value'] for exp in ep_exp_list]
@@ -424,24 +542,22 @@ def main(args=None):
                     advantages_tensor = torch.cat(all_advantages_list).unsqueeze(1).to(agent.device)
                     returns_tensor = torch.cat(all_returns_list).unsqueeze(1).to(agent.device)
 
-
                     #GAEの正規化
                     advantages_tensor = (advantages_tensor - advantages_tensor.mean()) / (advantages_tensor.std() + 1e-8)
                     
-
                     #PPO epochループ
+                    epoch_policy_losses = []
+                    epoch_value_losses = []
+                    epoch_entropy_losses = []
+                    epoch_total_losses = []
+                    
                     for ppo_epoch in range(ppo_epochs):
-                        #policy_netにstates_tensorを渡す際、LSTMの隠れ状態はNoneで渡す
                         pid_mean_raw, new_pid_std, new_value_preds, _ = agent.policy_net(states_tensor, hidden_state=None)
 
-                        #新しいPID平均値のスケーリング
                         new_pid_mean_normalized = torch.tanh(pid_mean_raw)
                         new_pid_mean_scaled = agent.min_pid + (agent.max_pid - agent.min_pid) * ((new_pid_mean_normalized + 1) / 2)
 
-                        #新しい分布を生成
                         new_dist = torch.distributions.Normal(new_pid_mean_scaled, new_pid_std)
-                        
-                        #新しい行動のログ確率を計算
                         new_log_probs = new_dist.log_prob(actions_tensor).sum(dim=1, keepdim=True)
 
                         #PPO損失の計算
@@ -450,36 +566,56 @@ def main(args=None):
                         surr2 = torch.clamp(ratio, 1.0 - agent.eps_clip, 1.0 + agent.eps_clip) * advantages_tensor
                         policy_loss = -torch.min(surr1, surr2).mean()
 
-                        #価値損失の計算
                         value_loss = F.mse_loss(new_value_preds, returns_tensor)
-
-                        #エントロピー損失（探索促進のため）
                         entropy_loss = -new_dist.entropy().mean()
+                        total_loss = policy_loss + 0.5 * value_loss - 0.01 * entropy_loss
 
-                        #合計損失
-                        total_loss = policy_loss + 0.5 * value_loss - 0.01 * entropy_loss # エントロピー項は最大化したいのでマイナス
-
-                        #バックプロパゲーションと最適化
                         optimizer.zero_grad()
                         total_loss.backward()
-                        torch.nn.utils.clip_grad_norm_(agent.policy_net.parameters(), 0.5) # 勾配クリッピング
+                        torch.nn.utils.clip_grad_norm_(agent.policy_net.parameters(), 0.5)
                         optimizer.step()
+                        
+                        #損失値を保存
+                        epoch_policy_losses.append(policy_loss.item())
+                        epoch_value_losses.append(value_loss.item())
+                        epoch_entropy_losses.append(entropy_loss.item())
+                        epoch_total_losses.append(total_loss.item())
                     
-                    print(f"[TRAIN] PPO Update Done. Policy Loss: {policy_loss.item():.4f}, Value Loss: {value_loss.item():.4f}, Entropy: {entropy_loss.item():.4f}")
+                    #このPPO更新の平均損失を保存
+                    training_data['policy_losses'].append(np.mean(epoch_policy_losses))
+                    training_data['value_losses'].append(np.mean(epoch_value_losses))
+                    training_data['entropy_losses'].append(np.mean(epoch_entropy_losses))
+                    training_data['total_losses'].append(np.mean(epoch_total_losses))
+                    
+                    print(f"[TRAIN] PPO Update Done. Policy Loss: {np.mean(epoch_policy_losses):.4f}, Value Loss: {np.mean(epoch_value_losses):.4f}, Entropy: {np.mean(epoch_entropy_losses):.4f}")
 
                 except Exception as e:
                     print(f"[TRAIN] Error during PPO update: {e}")
                     import traceback
-                    traceback.print_exc() #エラーのスタックトレースを出力
+                    traceback.print_exc()
                 finally:
-                    episode_buffer.clear() #バッチ処理後、バッファをクリア
+                    episode_buffer.clear()
+            
+            #50エピソードごとに中間結果を表示
+            if (episode + 1) % 50 == 0:
+                print(f"\n[INFO] Showing training progress at episode {episode + 1}")
+                plot_training_results()
 
     except KeyboardInterrupt:
-        print("Training interrupted by user. Shutting down.")
+        print("\nTraining interrupted by user!")
+    except Exception as e:
+        print(f"\nTraining stopped due to error: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
+        #常に最終結果を表示
+        print("\nDisplaying final training results...")
+        plot_training_results()
+        
         env_node.destroy_node()
         rclpy.shutdown()
         print("Training finished.")
+
 
 if __name__ == "__main__":
     main()
