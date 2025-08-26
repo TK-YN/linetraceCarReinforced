@@ -6,7 +6,7 @@ This project demonstrates how to use reinforcement learning to optimize PID gain
 
 ## Project Overview
 
-We use the **Proximal Policy Optimization (PPO)** algorithm to train a neural network with a **Long Short-Term Memory (LSTM)** layer. The LSTM layer is crucial for processing the time-series data from our sensors, allowing the robot to learn from the sequence of past observations.
+I use the **Proximal Policy Optimization (PPO)** algorithm to train a neural network with a **Long Short-Term Memory (LSTM)** layer. The LSTM layer is crucial for processing the time-series data from our sensors, allowing the robot to learn from the sequence of past observations.
 
 ---
 
